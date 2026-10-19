@@ -1,0 +1,150 @@
+{
+  "name": "Databasus v3 Postgres Backups and Restore",
+  "description": "Scheduled database backups to S3 with a dashboard, alerts and restore.",
+  "category": "Storage",
+  "tags": [
+    "databasus",
+    "backup",
+    "postgres",
+    "postgresql",
+    "mysql",
+    "mariadb",
+    "mongodb",
+    "s3",
+    "restore",
+    "pg-dump"
+  ],
+  "image": "https://cdn.jsdelivr.net/gh/databasus/databasus@v3.61.0/frontend/public/logo.svg",
+  "upstream": {
+    "repo": "databasus/databasus",
+    "version": "v3.61.0 (image databasus/databasus:v3.61.0, index digest sha256:4adcd3fd2ab48168a5ee05eb5dbacf1d179d6df387b0daa1c311f57d4f9dd31e, released 2026-10-10)",
+    "checked": "2026-10-20"
+  },
+  "services": {
+    "Databasus": {
+      "icon": "https://cdn.jsdelivr.net/gh/databasus/databasus@v3.61.0/frontend/public/logo.svg",
+      "source": {
+        "image": "databasus/databasus:v3.61.0"
+      },
+      "startCommand": "/bin/bash -c 'set -eu; if ! grep -Eq \"^[[:space:]]*exec gosu databasus [.]/main[[:space:]]*$\" /app/start.sh; then echo \"railway: unexpected /app/start.sh (no exec gosu databasus ./main), refusing to start without the admin bootstrap\" >&2; exit 1; fi; RAILWAY_REAL_GOSU=\"$(command -v gosu)\"; export RAILWAY_REAL_GOSU; railway_pg_stop() { \"$RAILWAY_REAL_GOSU\" databasus /usr/lib/postgresql/17/bin/pg_ctl -D /databasus-data/pgdata -m fast -w -t 30 stop || true; }; railway_bootstrap() { local marker=/databasus-data/.railway-admin-bootstrapped; if [ -f \"$marker\" ]; then echo \"railway: admin already provisioned on this volume\"; return 0; fi; local email=\"${DATABASUS_ADMIN_EMAIL:-}\"; local password=\"${DATABASUS_ADMIN_PASSWORD:-}\"; if [ -z \"$email\" ] || [ -z \"$password\" ]; then echo \"railway: DATABASUS_ADMIN_EMAIL and DATABASUS_ADMIN_PASSWORD are required, refusing to start without an administrator\" >&2; return 1; fi; echo \"railway: creating admin $email before the web server starts\"; if ! \"$RAILWAY_REAL_GOSU\" databasus ./main --create-user --email=\"$email\" --password=\"$password\" --role=admin; then echo \"railway: admin creation failed, see the error above\" >&2; return 1; fi; if [ \"${DATABASUS_DISABLE_SIGNUP:-true}\" = \"true\" ]; then if ! /usr/lib/postgresql/17/bin/psql -X -q -1 -v ON_ERROR_STOP=1 -d \"$DATABASE_DSN\" -c \"INSERT INTO users_settings (is_allow_external_registrations) SELECT false WHERE NOT EXISTS (SELECT 1 FROM users_settings)\" -c \"UPDATE users_settings SET is_allow_external_registrations = false\"; then echo \"railway: could not turn off sign-up, set DATABASUS_DISABLE_SIGNUP=false to skip this step\" >&2; return 1; fi; echo \"railway: open sign-up turned off (an admin can turn it back on in Databasus settings)\"; fi; \"$RAILWAY_REAL_GOSU\" databasus touch \"$marker\"; }; railway_on_term() { if [ -n \"${RAILWAY_MAIN_PID:-}\" ]; then kill -TERM \"$RAILWAY_MAIN_PID\" 2>/dev/null || true; fi; }; railway_run_main() { trap railway_on_term TERM INT; \"$RAILWAY_REAL_GOSU\" databasus ./main & RAILWAY_MAIN_PID=$!; local status=0; wait \"$RAILWAY_MAIN_PID\" || status=$?; while kill -0 \"$RAILWAY_MAIN_PID\" 2>/dev/null; do status=0; wait \"$RAILWAY_MAIN_PID\" || status=$?; done; echo \"railway: Databasus exited with status $status, stopping embedded PostgreSQL\"; railway_pg_stop; exit \"$status\"; }; railway_shim() { if [ \"$#\" -eq 2 ] && [ \"$1\" = databasus ] && [ \"$2\" = ./main ]; then if ! railway_bootstrap; then railway_pg_stop; exit 1; fi; railway_run_main; fi; exec \"$RAILWAY_REAL_GOSU\" \"$@\"; }; mkdir -p /tmp/railway-gosu-shim; { echo \"#!/bin/bash\"; declare -f railway_pg_stop railway_bootstrap railway_on_term railway_run_main railway_shim; echo \"railway_shim \\\"\\$@\\\"\"; } > /tmp/railway-gosu-shim/gosu; chmod 0755 /tmp/railway-gosu-shim/gosu; export PATH=\"/tmp/railway-gosu-shim:$PATH\"; exec /app/start.sh'",
+      "preDeployCommand": null,
+      "healthcheckPath": "/api/v1/system/version",
+      "healthcheckTimeout": 600,
+      "restartPolicyType": "ON_FAILURE",
+      "restartPolicyMaxRetries": 10,
+      "numReplicas": 1,
+      "cronSchedule": null,
+      "publicDomain": true,
+      "targetPort": 4005,
+      "tcpProxy": null,
+      "volume": {
+        "mountPath": "/databasus-data"
+      },
+      "variables": {
+        "PORT": {
+          "defaultValue": "4005",
+          "description": "Port Railway routes the public domain and the healthcheck to. Databasus always listens on 4005; keep this value.",
+          "required": false
+        },
+        "DATABASUS_ADMIN_EMAIL": {
+          "defaultValue": "",
+          "description": "Required. Your email: the administrator account is created with it on first boot, before the dashboard goes online. You sign in with it.",
+          "required": true
+        },
+        "DATABASUS_ADMIN_PASSWORD": {
+          "defaultValue": "${{secret(24, \"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789\")}}",
+          "description": "Initial administrator password, generated at deploy. Read on first boot only; change it later under your Databasus profile.",
+          "required": false
+        },
+        "DATABASUS_DISABLE_SIGNUP": {
+          "defaultValue": "true",
+          "description": "true = turn off open self-registration on first boot, so only users you invite can join. Applied once, together with the admin bootstrap.",
+          "required": false
+        },
+        "DATABASUS_URL": {
+          "defaultValue": "https://${{RAILWAY_PUBLIC_DOMAIN}}",
+          "description": "Public URL of this instance, used in invitation and sign-in emails.",
+          "required": false
+        },
+        "LOG_FILE_IS_ENABLED": {
+          "defaultValue": "false",
+          "description": "false = log to stdout only (Railway keeps the logs). true also writes a rotating databasus.log on the volume.",
+          "required": false
+        },
+        "LOG_LEVEL": {
+          "defaultValue": "info",
+          "description": "Log level: debug, info, warn or error.",
+          "required": false
+        },
+        "IS_DISABLE_ANONYMOUS_TELEMETRY": {
+          "defaultValue": "false",
+          "description": "Databasus sends anonymous usage telemetry by default (upstream default). Set true to opt out.",
+          "required": false
+        },
+        "SMTP_HOST": {
+          "defaultValue": "",
+          "description": "Optional instance mail server for invitations, password reset and sign-in codes. Railway allows outbound SMTP on the Pro plan only.",
+          "required": false
+        },
+        "SMTP_PORT": {
+          "defaultValue": "",
+          "description": "Optional. SMTP port, e.g. 587 or 465. Required when SMTP_HOST is set.",
+          "required": false
+        },
+        "SMTP_SECURITY": {
+          "defaultValue": "",
+          "description": "Optional. tls, starttls or none. Empty = tls on port 465, starttls on any other port.",
+          "required": false
+        },
+        "SMTP_USER": {
+          "defaultValue": "",
+          "description": "Optional. SMTP username.",
+          "required": false
+        },
+        "SMTP_PASSWORD": {
+          "defaultValue": "",
+          "description": "Optional. SMTP password or API key.",
+          "required": false
+        },
+        "SMTP_FROM": {
+          "defaultValue": "",
+          "description": "Optional. Sender address, e.g. noreply@your-domain.com. Empty = SMTP_USER if it is an address.",
+          "required": false
+        },
+        "S3_ENDPOINT": {
+          "defaultValue": "${{Bucket.ENDPOINT}}",
+          "description": "Railway Bucket endpoint. Not read by Databasus: paste it into Storages, S3, Endpoint.",
+          "required": false
+        },
+        "S3_BUCKET": {
+          "defaultValue": "${{Bucket.BUCKET}}",
+          "description": "Railway Bucket name for the S3 API. Not read by Databasus: paste it into Storages, S3, Bucket.",
+          "required": false
+        },
+        "S3_REGION": {
+          "defaultValue": "${{Bucket.REGION}}",
+          "description": "Railway Bucket region (auto). Not read by Databasus: paste it into Storages, S3, Region.",
+          "required": false
+        },
+        "S3_ACCESS_KEY_ID": {
+          "defaultValue": "${{Bucket.ACCESS_KEY_ID}}",
+          "description": "Railway Bucket access key. Not read by Databasus: paste it into Storages, S3, Access key.",
+          "required": false
+        },
+        "S3_SECRET_ACCESS_KEY": {
+          "defaultValue": "${{Bucket.SECRET_ACCESS_KEY}}",
+          "description": "Railway Bucket secret key. Not read by Databasus: paste it into Storages, S3, Secret key.",
+          "required": false
+        },
+        "RAILWAY_DEPLOYMENT_DRAINING_SECONDS": {
+          "defaultValue": "60",
+          "description": "Time between SIGTERM and SIGKILL, so Databasus and its embedded PostgreSQL shut down cleanly on redeploy.",
+          "required": false
+        }
+      }
+    }
+  },
+  "buckets": [
+    "Bucket"
+  ]
+}
