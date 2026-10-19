@@ -1,5 +1,7 @@
 # Deploy and Host Databasus with Railway
 
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/databasus-v3-postgres-backups-and-restor?referralCode=20H68q)
+
 Databasus is an open source (Apache-2.0) tool that backs up PostgreSQL, MySQL, MariaDB and MongoDB on a schedule, keeps the files in S3 or other storage, alerts you on success or failure and restores from a web dashboard. This community template runs Databasus 3.61.0 with a Railway Bucket for backup storage and a locked-down admin account.
 
 ## About Hosting Databasus
